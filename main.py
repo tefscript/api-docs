@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status, File, UploadFile
 from pptx import Presentation
 import docx
@@ -6,8 +7,31 @@ from pydantic import BaseModel #validação e parsing de dados
 from io import BytesIO
 import zipfile #lida com PPTX como arquivo ZIP
 import openpyxl #arquivos excel embutidos no pptx
+import os
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Depends
+import secrets
+
+security = HTTPBasic()
+
+load_dotenv()
+
+USERNAME = os.getenv("BASIC_AUTH_USER")
+PASSWORD = os.getenv("BASIC_AUTH_PASSWORD")
 
 app = FastAPI()
+
+def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, USERNAME)
+    correct_password = secrets.compare_digest(credentials.password, PASSWORD)
+
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciais inválidas.",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 #modelo para dados Base64
 class FileBase64(BaseModel):
@@ -85,7 +109,7 @@ def extract_text_from_pptx(file_stream: BytesIO) -> str:
 
 #endpoint arquivos Base64 (DOCX e PPTX)
 @app.post("/extract-text-base64")
-async def extract_text_base64(file: FileBase64):
+async def extract_text_base64(file: FileBase64, username: str = Depends(authenticate)):
     try:
         binary_data = base64.b64decode(file.data)
         file_stream = BytesIO(binary_data)
@@ -116,7 +140,7 @@ async def extract_text_base64(file: FileBase64):
 
 #endpoint para arquivos binários (mantido para compatibilidade, mas o N8N usará o base64)
 @app.post("/extract-pptx-binary")
-async def extract_pptx_binary(file: UploadFile = File(...)):
+async def extract_pptx_binary(file: UploadFile = File(...), username: str = Depends(authenticate)):
     try:
         contents = await file.read()
         file_stream = BytesIO(contents)
@@ -128,7 +152,7 @@ async def extract_pptx_binary(file: UploadFile = File(...)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro interno ao processar PPTX: {e}")
 
 @app.post("/extract-docx-binary")
-async def extract_docx_binary(file: UploadFile = File(...)):
+async def extract_docx_binary(file: UploadFile = File(...), username: str = Depends(authenticate)):
     try:
         contents = await file.read()
         file_stream = BytesIO(contents)
